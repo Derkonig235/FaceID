@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+database/database.db
+uploads/
+static/results/
+*.pkl
