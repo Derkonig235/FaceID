@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FaceID — Temps réel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/" class="logo">FaceID</a>
+        <div class="nav-links">
+            <a href="/persons">Personnes</a>
+            <a href="/image">Image</a>
+            <a href="/video">Vidéo</a>
+            <a href="/live">Temps réel</a>
+        </div>
+    </nav>
+
+    <main>
+        <div class="page-header">
+            <h2>Reconnaissance en temps réel</h2>
+            <p>Activez la webcam pour une détection et reconnaissance continue.</p>
+        </div>
+
+        <div class="content-grid">
+            <div class="card">
+                <h3>Flux webcam</h3>
+                <video id="webcam" autoplay playsinline style="width:100%; border-radius:8px; border:1px solid var(--border); background:#000;"></video>
+                <canvas id="canvas" style="display:none;"></canvas>
+                <div style="display:flex; gap:1rem; margin-top:1.25rem;">
+                    <button class="btn-primary" style="flex:1; border:none; cursor:pointer;" onclick="demarrer()">Démarrer</button>
+                    <button class="btn-secondary" style="flex:1; cursor:pointer;" onclick="arreter()">Arrêter</button>
+                </div>
+                <div id="message"></div>
+            </div>
+
+            <div class="card">
+                <h3>Détections</h3>
+                <div id="detections" style="color:var(--text-muted); font-size:0.9rem;">
+                    Les détections apparaîtront ici en temps réel.
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let stream = null;
+        let intervalId = null;
+
+        async function demarrer() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                document.getElementById('webcam').srcObject = stream;
+                intervalId = setInterval(captureEtAnalyser, 2000);
+                afficherMessage('Webcam active.', 'success');
+            } catch (e) {
+                afficherMessage('Impossible d\'accéder à la webcam.', 'error');
+            }
+        }
+
+        function arreter() {
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+                stream = null;
+            }
+            if (intervalId) {
+                clearInterval(intervalId);
+                intervalId = null;
+            }
+            document.getElementById('webcam').srcObject = null;
+            document.getElementById('detections').innerHTML = 'Les détections apparaîtront ici en temps réel.';
+            afficherMessage('', '');
+        }
+
+        async function captureEtAnalyser() {
+            const video = document.getElementById('webcam');
+            const canvas = document.getElementById('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+
+            canvas.toBlob(async blob => {
+                const formData = new FormData();
+                formData.append('photo', blob, 'frame.jpg');
+
+                const response = await fetch('/api/analyser/image', { method: 'POST', body: formData });
+                const data = await response.json();
+
+                if (data.erreur || !data.resultats) return;
+
+                let html = `<p style="color:var(--text-secondary); margin-bottom:0.75rem;">${data.nb_visages} visage(s) détecté(s)</p>`;
+                data.resultats.forEach(r => {
+                    const label = r.nom === 'Inconnu' ? 'Inconnu' : `${r.prenom} ${r.nom}`;
+                    const couleur = r.nom === 'Inconnu' ? 'var(--danger)' : 'var(--success)';
+                    html += `<div style="display:flex; justify-content:space-between; padding:0.6rem 0; border-bottom:1px solid var(--border);">
+                        <span style="color:${couleur}; font-weight:500;">${label}</span>
+                        <span style="color:var(--text-muted); font-size:0.85rem;">${r.confiance.toFixed(1)}%</span>
+                    </div>`;
+                });
+
+                document.getElementById('detections').innerHTML = html;
+            }, 'image/jpeg');
+        }
+
+        function afficherMessage(texte, type) {
+            const el = document.getElementById('message');
+            if (!texte) { el.innerHTML = ''; return; }
+            const cls = type === 'error' ? 'message-error' : 'message-success';
+            el.innerHTML = `<div class="${cls}" style="margin-top:1rem;">${texte}</div>`;
+        }
+    </script>
+</body>
+</html>

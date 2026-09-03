@@ -39,19 +39,6 @@ def distance_cosinus(vec1, vec2):
     return 1 - (dot / norme) if norme != 0 else 1.0
 
 def identifier_visage(crop_rgb, personnes, seuil=0.5):
-    """
-    Identifie un visage en le comparant à la base de données.
-    
-    Args:
-        crop_rgb: image du visage en RGB
-        personnes: liste des personnes depuis la base de données
-        seuil: distance maximale pour considérer une correspondance
-    
-    Returns:
-        nom: nom de la personne reconnue ou "Inconnu"
-        prenom: prénom de la personne reconnue ou ""
-        confiance: pourcentage de confiance
-    """
     embedding_inconnu = extraire_embedding(crop_rgb)
     if embedding_inconnu is None:
         return "Inconnu", "", 0.0
@@ -66,6 +53,9 @@ def identifier_visage(crop_rgb, personnes, seuil=0.5):
             meilleure_distance = distance
             meilleur_nom = personne['nom']
             meilleur_prenom = personne['prenom']
+
+    if meilleur_nom == "Inconnu":
+        return "Inconnu", "", 0.0
 
     confiance = max(0, (1 - meilleure_distance) * 100)
     return meilleur_nom, meilleur_prenom, confiance

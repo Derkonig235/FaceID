@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FaceID — Analyse image</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/" class="logo">FaceID</a>
+        <div class="nav-links">
+            <a href="/persons">Personnes</a>
+            <a href="/image">Image</a>
+            <a href="/video">Vidéo</a>
+            <a href="/live">Temps réel</a>
+        </div>
+    </nav>
+
+    <main>
+        <div class="page-header">
+            <h2>Analyse d'image</h2>
+            <p>Importez une image pour détecter et reconnaître les visages.</p>
+        </div>
+
+        <div class="content-grid">
+            <div class="card">
+                <h3>Importer une image</h3>
+                <div id="uploadZone" class="upload-zone" onclick="document.getElementById('fileInput').click()">
+                    <p>Cliquez pour choisir une image</p>
+                    <p style="margin-top:0.5rem; font-size:0.8rem;">JPG, PNG acceptés</p>
+                    <input type="file" id="fileInput" accept="image/*" onchange="previewImage(event)">
+                </div>
+
+                <div id="preview" style="margin-top:1.25rem; display:none;">
+                    <img id="previewImg" style="width:100%; border-radius:8px; border:1px solid var(--border);">
+                    <button id="btnChanger" class="btn-secondary" style="margin-top:0.75rem; width:100%; cursor:pointer;" onclick="changerImage()">
+                        Choisir une autre image
+                    </button>
+                </div>
+                <button id="btnAnalyser" class="btn-primary" style="margin-top:1.25rem; width:100%; border:none; cursor:pointer;" onclick="analyserImage()">
+                    Analyser
+                </button>
+                <button id="btnAnnuler" class="btn-secondary" style="margin-top:1.25rem; width:100%; cursor:pointer; display:none;" onclick="annuler()">
+                    Annuler l'analyse
+                </button>
+                <div id="message"></div>
+            </div>
+
+            <div class="card">
+                <h3>Résultat</h3>
+                <div id="resultat" style="color:var(--text-muted); font-size:0.9rem;">
+                    Le résultat apparaîtra ici après l'analyse.
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/js/script.js"></script>
+    <script>
+        let controller = null;
+
+        function previewImage(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                document.getElementById('previewImg').src = e.target.result;
+                document.getElementById('preview').style.display = 'block';
+                document.getElementById('uploadZone').style.display = 'none';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function changerImage() {
+            document.getElementById('fileInput').click();
+        }
+
+        function modeAnalyse(actif) {
+            document.getElementById('btnAnalyser').style.display = actif ? 'none' : 'block';
+            document.getElementById('btnChanger').style.display = actif ? 'none' : 'block';
+            document.getElementById('btnAnnuler').style.display = actif ? 'block' : 'none';
+        }
+
+        function annuler() {
+            if (controller) {
+                controller.abort();
+                controller = null;
+            }
+            modeAnalyse(false);
+            afficherMessage('Analyse annulée.', 'error');
+        }
+
+        async function analyserImage() {
+            const file = document.getElementById('fileInput').files[0];
+            if (!file) {
+                afficherMessage('Veuillez sélectionner une image.', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('photo', file);
+
+            controller = new AbortController();
+            modeAnalyse(true);
+            afficherMessage('Analyse en cours...', 'info');
+
+            const debut = Date.now();
+
+            try {
+                const response = await fetch('/api/analyser/image', {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal
+                });
+                const data = await response.json();
+                const duree = ((Date.now() - debut) / 1000).toFixed(2);
+
+                modeAnalyse(false);
+
+                if (data.erreur) {
+                    afficherMessage(data.erreur, 'error');
+                    return;
+                }
+
+                afficherMessage('', '');
+
+                let html = `<p style="margin-bottom:0.5rem; color:var(--text-secondary)">${data.nb_visages} visage(s) détecté(s)</p>`;
+                html += `<p style="margin-bottom:1rem; color:var(--text-muted); font-size:0.82rem;">Temps d'analyse : ${duree}s</p>`;
+                html += `<img src="${data.image_resultat}" style="width:100%; border-radius:8px; border:1px solid var(--border); margin-bottom:1rem;">`;
+
+                data.resultats.forEach(r => {
+                    const label = r.nom === 'Inconnu' ? 'Inconnu' : `${r.prenom} ${r.nom}`;
+                    const couleur = r.nom === 'Inconnu' ? 'var(--danger)' : 'var(--success)';
+                    html += `<div style="display:flex; justify-content:space-between; padding:0.6rem 0; border-bottom:1px solid var(--border);">
+                        <span style="color:${couleur}; font-weight:500;">${label}</span>
+                        <span style="color:var(--text-muted); font-size:0.85rem;">${r.confiance.toFixed(1)}%</span>
+                    </div>`;
+                });
+
+                document.getElementById('resultat').innerHTML = html;
+
+            } catch (e) {
+                modeAnalyse(false);
+                if (e.name !== 'AbortError') {
+                    afficherMessage('Une erreur est survenue.', 'error');
+                }
+            }
+        }
+
+        function afficherMessage(texte, type) {
+            const el = document.getElementById('message');
+            if (!texte) { el.innerHTML = ''; return; }
+            const cls = type === 'error' ? 'message-error' : 'message-success';
+            el.innerHTML = `<div class="${cls}">${texte}</div>`;
+        }
+    </script>
+</body>
+</html>

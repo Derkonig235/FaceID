@@ -1,11 +1,12 @@
 import os
 import cv2
+import json
 import numpy as np
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, Response, stream_with_context
 from database.db import initialiser_db, ajouter_personne, get_toutes_personnes, supprimer_personne, modifier_personne
 from services.detection import detecter_visages, aligner_visage, preparer_image
 from services.recognition import extraire_embedding, identifier_visage
-from services.video_processing import traiter_video
+from services.video_processing import analyser_video_stream
 
 app = Flask(__name__)
 
@@ -116,15 +117,19 @@ def api_analyser_image():
     if not photo:
         return jsonify({'erreur': 'Aucune image reçue'}), 400
 
-    # Sauvegarder l'image
     chemin = os.path.join(app.config['UPLOAD_IMAGES'], photo.filename)
     photo.save(chemin)
 
-    # Lire et préparer
     image_cv = cv2.imread(chemin)
+    h_orig, w_orig = image_cv.shape[:2]
+    
     image_rgb = preparer_image(image_cv)
+    h_prep, w_prep = image_rgb.shape[:2]
+    
+    # Facteurs de redimensionnement
+    scale_x = w_orig / w_prep
+    scale_y = h_orig / h_prep
 
-    # Détecter les visages
     faces = detecter_visages(image_rgb)
     personnes = get_toutes_personnes()
 
@@ -137,20 +142,24 @@ def api_analyser_image():
         nom, prenom, confiance = identifier_visage(crop, personnes)
         couleur = (0, 255, 0) if nom != "Inconnu" else (0, 0, 255)
 
-        # Dessiner sur l'image originale
-        cv2.rectangle(image_cv, (x1, y1), (x2, y2), couleur, 2)
+        # Convertir les coordonnées vers l'image originale
+        x1_orig = int(x1 * scale_x)
+        y1_orig = int(y1 * scale_y)
+        x2_orig = int(x2 * scale_x)
+        y2_orig = int(y2 * scale_y)
+
+        cv2.rectangle(image_cv, (x1_orig, y1_orig), (x2_orig, y2_orig), couleur, 2)
         label = f"{prenom} {nom} {confiance:.0f}%" if nom != "Inconnu" else "Inconnu"
-        cv2.rectangle(image_cv, (x1, y1 - 30), (x1 + len(label) * 12, y1), couleur, -1)
-        cv2.putText(image_cv, label, (x1 + 4, y1 - 8),
+        cv2.rectangle(image_cv, (x1_orig, y1_orig - 30), (x1_orig + len(label) * 12, y1_orig), couleur, -1)
+        cv2.putText(image_cv, label, (x1_orig + 4, y1_orig - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
         resultats.append({
             'nom': nom,
             'prenom': prenom,
-            'confiance': round(confiance, 1)
+            'confiance': float(round(confiance, 1))
         })
 
-    # Sauvegarder le résultat
     nom_resultat = f"result_{photo.filename}"
     chemin_resultat = os.path.join(app.config['RESULTS'], nom_resultat)
     cv2.imwrite(chemin_resultat, image_cv)
@@ -165,26 +174,31 @@ def api_analyser_image():
 # API - ANALYSE VIDÉO
 # ─────────────────────────────────────────
 
-@app.route('/api/analyser/video', methods=['POST'])
-def api_analyser_video():
+@app.route('/api/analyser/video/upload', methods=['POST'])
+def api_video_upload():
     video = request.files.get('video')
     if not video:
         return jsonify({'erreur': 'Aucune vidéo reçue'}), 400
 
     chemin_video = os.path.join(app.config['UPLOAD_VIDEOS'], video.filename)
     video.save(chemin_video)
+    return jsonify({'fichier': video.filename})
 
-    nom_resultat = f"result_{video.filename}"
+@app.route('/api/analyser/video/stream')
+def api_video_stream():
+    fichier = request.args.get('fichier')
+    if not fichier:
+        return jsonify({'erreur': 'Fichier manquant'}), 400
+
+    chemin_video = os.path.join(app.config['UPLOAD_VIDEOS'], fichier)
+    nom_resultat = f"result_{fichier}"
     chemin_resultat = os.path.join(app.config['RESULTS'], nom_resultat)
 
-    resultat = traiter_video(chemin_video, chemin_resultat)
-    if resultat is None:
-        return jsonify({'erreur': 'Impossible de traiter la vidéo'}), 400
+    def generer():
+        for data in analyser_video_stream(chemin_video, chemin_resultat):
+            yield f"data: {json.dumps(data)}\n\n"
 
-    return jsonify({
-        'message': 'Vidéo traitée avec succès',
-        'video_resultat': f'/static/results/{nom_resultat}'
-    })
+    return Response(stream_with_context(generer()), mimetype='text/event-stream')
 
 if __name__ == '__main__':
     app.run(debug=True)

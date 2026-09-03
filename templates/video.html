@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FaceID — Analyse vidéo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/" class="logo">FaceID</a>
+        <div class="nav-links">
+            <a href="/persons">Personnes</a>
+            <a href="/image">Image</a>
+            <a href="/video">Vidéo</a>
+            <a href="/live">Temps réel</a>
+        </div>
+    </nav>
+
+    <main>
+        <div class="page-header">
+            <h2>Analyse de vidéo</h2>
+            <p>Importez une vidéo pour détecter et reconnaître les visages sur chaque frame.</p>
+        </div>
+
+        <div class="content-grid">
+            <div class="card">
+                <h3>Importer une vidéo</h3>
+                <div id="uploadZone" class="upload-zone" onclick="document.getElementById('videoInput').click()">
+                    <p>Cliquez pour choisir une vidéo</p>
+                    <p style="margin-top:0.5rem; font-size:0.8rem;">MP4, AVI acceptés — 100 MB max</p>
+                    <input type="file" id="videoInput" accept="video/*" onchange="previewVideo(event)">
+                </div>
+
+                <div id="preview" style="margin-top:1.25rem; display:none;">
+                    <video id="previewVid" controls style="width:100%; border-radius:8px; border:1px solid var(--border);"></video>
+                    <button id="btnChanger" class="btn-secondary" style="margin-top:0.75rem; width:100%; cursor:pointer;" onclick="changerVideo()">
+                        Choisir une autre vidéo
+                    </button>
+                </div>
+
+                <button id="btnAnalyser" class="btn-primary" style="margin-top:1.25rem; width:100%; border:none; cursor:pointer;" onclick="analyserVideo()">
+                    Analyser
+                </button>
+                <button id="btnAnnuler" class="btn-secondary" style="margin-top:1.25rem; width:100%; cursor:pointer; display:none;" onclick="annuler()">
+                    Annuler l'analyse
+                </button>
+                <div id="message"></div>
+            </div>
+
+            <div class="card">
+                <h3>Résultat</h3>
+                <div id="resultat" style="color:var(--text-muted); font-size:0.9rem;">
+                    La vidéo annotée apparaîtra ici après l'analyse.
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let eventSource = null;
+let debut = null;
+let personnesVues = {};
+
+function previewVideo(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    document.getElementById('previewVid').src = url;
+    document.getElementById('preview').style.display = 'block';
+    document.getElementById('uploadZone').style.display = 'none';
+}
+
+function changerVideo() {
+    document.getElementById('videoInput').click();
+}
+
+function modeAnalyse(actif) {
+    document.getElementById('btnAnalyser').style.display = actif ? 'none' : 'block';
+    document.getElementById('btnChanger').style.display = actif ? 'none' : 'block';
+    document.getElementById('btnAnnuler').style.display = actif ? 'block' : 'none';
+}
+
+function annuler() {
+    if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+    }
+    modeAnalyse(false);
+    afficherMessage('Analyse annulée.', 'error');
+}
+
+async function analyserVideo() {
+    const file = document.getElementById('videoInput').files[0];
+    if (!file) {
+        afficherMessage('Veuillez sélectionner une vidéo.', 'error');
+        return;
+    }
+
+    personnesVues = {};
+    const formData = new FormData();
+    formData.append('video', file);
+
+    modeAnalyse(true);
+    afficherMessage('Envoi de la vidéo...', 'info');
+
+    const uploadResponse = await fetch('/api/analyser/video/upload', {
+        method: 'POST',
+        body: formData
+    });
+    const uploadData = await uploadResponse.json();
+
+    if (uploadData.erreur) {
+        afficherMessage(uploadData.erreur, 'error');
+        modeAnalyse(false);
+        return;
+    }
+
+    afficherMessage('Analyse en cours...', 'info');
+    debut = Date.now();
+
+    document.getElementById('resultat').innerHTML = `
+        <div id="progression">
+            <p style="color:var(--text-secondary); margin-bottom:0.75rem;">Analyse en cours...</p>
+            <div style="background:var(--border); border-radius:999px; height:6px; margin-bottom:0.5rem;">
+                <div id="barre" style="background:var(--accent); height:6px; border-radius:999px; width:0%; transition:width 0.3s;"></div>
+            </div>
+            <p id="pourcentage" style="color:var(--text-muted); font-size:0.82rem; margin-bottom:1rem;">0%</p>
+        </div>
+        <div id="detections-live"></div>
+    `;
+
+    eventSource = new EventSource(`/api/analyser/video/stream?fichier=${uploadData.fichier}`);
+
+    eventSource.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+
+        if (data.type === 'frame') {
+            document.getElementById('barre').style.width = `${data.progression}%`;
+            document.getElementById('pourcentage').textContent = `${data.progression}% — frame ${data.frame + 1}/${data.total}`;
+
+            data.detections.forEach(d => {
+                const cle = d.nom === 'Inconnu' ? `inconnu_${d.timestamp}` : `${d.prenom}_${d.nom}`;
+
+                if (d.nom === 'Inconnu') {
+                    // Chaque inconnu est unique
+                    if (!personnesVues[cle]) {
+                        personnesVues[cle] = {
+                            label: 'Inconnu',
+                            timestamp: d.timestamp,
+                            confiance: 0,
+                            connu: false
+                        };
+                        afficherLigne(cle);
+                    }
+                } else {
+                    // Personne connue — une seule ligne
+                    if (!personnesVues[cle]) {
+                        personnesVues[cle] = {
+                            label: `${d.prenom} ${d.nom}`,
+                            timestamp: d.timestamp,
+                            confiance: d.confiance,
+                            connu: true
+                        };
+                        afficherLigne(cle);
+                    }
+                }
+            });
+        }
+
+        if (data.type === 'termine') {
+            eventSource.close();
+            eventSource = null;
+            modeAnalyse(false);
+
+            const duree = ((Date.now() - debut) / 1000).toFixed(2);
+            afficherMessage('', '');
+
+            const personnesConnues = Object.values(personnesVues).filter(p => p.connu);
+            const inconnus = Object.values(personnesVues).filter(p => !p.connu);
+
+            let html = `
+                <p style="color:var(--success); margin-bottom:0.5rem;">Analyse terminée.</p>
+                <p style="color:var(--text-muted); font-size:0.82rem; margin-bottom:1.5rem;">Temps total : ${duree}s</p>
+                <h4 style="font-family:var(--font-display); margin-bottom:0.75rem; color:var(--text-primary);">Résumé</h4>
+                <div style="display:flex; gap:1rem; margin-bottom:1.5rem;">
+                    <div style="flex:1; background:rgba(34,197,94,0.1); border:1px solid rgba(34,197,94,0.25); border-radius:8px; padding:1rem; text-align:center;">
+                        <p style="font-size:1.5rem; font-weight:700; color:var(--success);">${personnesConnues.length}</p>
+                        <p style="font-size:0.82rem; color:var(--text-muted);">Personne(s) connue(s)</p>
+                    </div>
+                    <div style="flex:1; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); border-radius:8px; padding:1rem; text-align:center;">
+                        <p style="font-size:1.5rem; font-weight:700; color:var(--danger);">${inconnus.length}</p>
+                        <p style="font-size:0.82rem; color:var(--text-muted);">Visage(s) inconnu(s)</p>
+                    </div>
+                </div>
+            `;
+
+            if (personnesConnues.length > 0) {
+                html += `<h4 style="font-family:var(--font-display); margin-bottom:0.75rem; color:var(--text-primary);">Personnes identifiées</h4>`;
+                personnesConnues.forEach(p => {
+                    html += `<div style="display:flex; justify-content:space-between; padding:0.6rem 0; border-bottom:1px solid var(--border);">
+                        <span style="color:var(--success); font-weight:500;">${p.label}</span>
+                        <span style="color:var(--text-muted); font-size:0.85rem;">apparu à ${p.timestamp}s — ${p.confiance.toFixed(1)}%</span>
+                    </div>`;
+                });
+            }
+
+            html += `
+                <div style="margin-top:1.5rem;">
+                    <video controls style="width:100%; border-radius:8px; border:1px solid var(--border);">
+                        <source src="${data.video_resultat}" type="video/mp4">
+                    </video>
+                    <a href="${data.video_resultat}" download class="btn-secondary" style="display:inline-block; margin-top:1rem;">
+                        Télécharger
+                    </a>
+                </div>
+            `;
+
+            document.getElementById('resultat').innerHTML = html;
+        }
+    };
+
+    eventSource.onerror = function() {
+        eventSource.close();
+        modeAnalyse(false);
+        afficherMessage('Une erreur est survenue.', 'error');
+    };
+}
+
+function afficherLigne(cle) {
+    const p = personnesVues[cle];
+    const couleur = p.connu ? 'var(--success)' : 'var(--danger)';
+    const div = document.getElementById('detections-live');
+    div.innerHTML += `<div style="display:flex; justify-content:space-between; padding:0.4rem 0; border-bottom:1px solid var(--border); font-size:0.85rem;">
+        <span style="color:${couleur};">${p.label}</span>
+        <span style="color:var(--text-muted);">apparu à ${p.timestamp}s</span>
+    </div>`;
+}
+
+function afficherMessage(texte, type) {
+    const el = document.getElementById('message');
+    if (!texte) { el.innerHTML = ''; return; }
+    const cls = type === 'error' ? 'message-error' : 'message-success';
+    el.innerHTML = `<div class="${cls}">${texte}</div>`;
+}
+    </script>
+</body>
+</html>

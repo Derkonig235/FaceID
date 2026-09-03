@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FaceID — Personnes</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/" class="logo">FaceID</a>
+        <div class="nav-links">
+            <a href="/persons">Personnes</a>
+            <a href="/image">Image</a>
+            <a href="/video">Vidéo</a>
+            <a href="/live">Temps réel</a>
+        </div>
+    </nav>
+
+    <main>
+        <div class="page-header">
+            <h2>Gestion des personnes</h2>
+            <p>Enregistrez et gérez les personnes connues du système.</p>
+        </div>
+
+        <div class="content-grid">
+            <div class="card">
+                <h3>Ajouter une personne</h3>
+                <div class="form-group">
+                    <label>Nom</label>
+                    <input type="text" id="nom" placeholder="Nom de famille">
+                </div>
+                <div class="form-group">
+                    <label>Prénom</label>
+                    <input type="text" id="prenom" placeholder="Prénom">
+                </div>
+                <div class="form-group">
+                    <label>Photo de référence</label>
+                    <div class="upload-zone" onclick="document.getElementById('photoInput').click()">
+                        <p>Cliquez pour choisir une photo</p>
+                        <p style="margin-top:0.5rem; font-size:0.8rem;">Un seul visage visible recommandé</p>
+                        <input type="file" id="photoInput" accept="image/*" onchange="previewPhoto(event)">
+                    </div>
+                    <div id="photoPreview" style="margin-top:0.75rem; display:none;">
+                        <img id="photoImg" style="width:100%; max-height:200px; object-fit:cover; border-radius:8px; border:1px solid var(--border);">
+                    </div>
+                </div>
+                <button class="btn-primary" style="width:100%; border:none; cursor:pointer;" onclick="ajouterPersonne()">
+                    Enregistrer
+                </button>
+                <div id="message"></div>
+            </div>
+
+            <div class="card">
+                <h3>Personnes enregistrées</h3>
+                <div id="liste-personnes">
+                    {% if personnes %}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Nom</th>
+                                <th>Prénom</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody">
+                            {% for p in personnes %}
+                            <tr id="row-{{ p.id }}">
+                                <td>{{ p.nom }}</td>
+                                <td>{{ p.prenom }}</td>
+                                <td>
+                                    <button class="btn-danger" onclick="supprimerPersonne({{ p.id }})">Supprimer</button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <p style="color:var(--text-muted); font-size:0.9rem;">Aucune personne enregistrée.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        function previewPhoto(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                document.getElementById('photoImg').src = e.target.result;
+                document.getElementById('photoPreview').style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function ajouterPersonne() {
+            const nom = document.getElementById('nom').value.trim();
+            const prenom = document.getElementById('prenom').value.trim();
+            const photo = document.getElementById('photoInput').files[0];
+
+            if (!nom || !prenom || !photo) {
+                afficherMessage('Tous les champs sont obligatoires.', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('nom', nom);
+            formData.append('prenom', prenom);
+            formData.append('photo', photo);
+
+            afficherMessage('Enregistrement en cours...', 'info');
+
+            const response = await fetch('/api/personnes/ajouter', { method: 'POST', body: formData });
+            const data = await response.json();
+
+            if (data.erreur) {
+                afficherMessage(data.erreur, 'error');
+                return;
+            }
+
+            afficherMessage(data.message, 'success');
+            setTimeout(() => location.reload(), 1500);
+        }
+
+        async function supprimerPersonne(id) {
+            if (!confirm('Confirmer la suppression ?')) return;
+
+            const response = await fetch(`/api/personnes/supprimer/${id}`, { method: 'DELETE' });
+            const data = await response.json();
+
+            if (data.message) {
+                document.getElementById(`row-${id}`).remove();
+            }
+        }
+
+        function afficherMessage(texte, type) {
+            const el = document.getElementById('message');
+            if (!texte) { el.innerHTML = ''; return; }
+            const cls = type === 'error' ? 'message-error' : 'message-success';
+            el.innerHTML = `<div class="${cls}" style="margin-top:1rem;">${texte}</div>`;
+        }
+    </script>
+</body>
+</html>
