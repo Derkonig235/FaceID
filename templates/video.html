@@ -144,8 +144,14 @@ async function analyserVideo() {
             data.detections.forEach(d => {
                 const cle = d.nom === 'Inconnu' ? `inconnu_${d.timestamp}` : `${d.prenom}_${d.nom}`;
 
-                if (d.nom === 'Inconnu') {
-                    // Chaque inconnu est unique
+               if (d.nom === 'Inconnu') {
+                    // Compter les inconnus déjà dans cette frame
+                    const inconnus = Object.keys(personnesVues).filter(k => k.startsWith('inconnu_'));
+                    const dansMemFrame = inconnus.filter(k => personnesVues[k].timestamp === d.timestamp);
+                    
+                    // Créer une clé basée sur l'ordre d'apparition, pas le timestamp
+                    const cle = `inconnu_${dansMemFrame.length}`;
+                    
                     if (!personnesVues[cle]) {
                         personnesVues[cle] = {
                             label: 'Inconnu',
