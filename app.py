@@ -1,3 +1,5 @@
+import uuid
+from werkzeug.utils import secure_filename
 import os
 import cv2
 import json
@@ -16,6 +18,10 @@ app.config['UPLOAD_VIDEOS'] = 'uploads/videos'
 app.config['KNOWN_FACES'] = 'known_faces'
 app.config['RESULTS'] = 'static/results'
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100 MB max
+
+def nom_unique(nom_fichier):
+    """Retourne un nom sûr et unique pour éviter les écrasements."""
+    return f"{uuid.uuid4().hex[:8]}_{secure_filename(nom_fichier)}"
 
 # Initialiser la base de données au démarrage
 initialiser_db()
@@ -65,7 +71,7 @@ def api_ajouter_personne():
         return jsonify({'erreur': 'Nom, prénom et photo sont obligatoires'}), 400
 
     # Sauvegarder la photo
-    chemin_photo = os.path.join(app.config['KNOWN_FACES'], photo.filename)
+    chemin_photo = os.path.join(app.config['KNOWN_FACES'], nom_unique(photo.filename))
     photo.save(chemin_photo)
 
     # Lire et préparer l'image
@@ -117,7 +123,8 @@ def api_analyser_image():
     if not photo:
         return jsonify({'erreur': 'Aucune image reçue'}), 400
 
-    chemin = os.path.join(app.config['UPLOAD_IMAGES'], photo.filename)
+    nom_fichier = nom_unique(photo.filename)
+    chemin = os.path.join(app.config['UPLOAD_IMAGES'], nom_fichier)
     photo.save(chemin)
 
     image_cv = cv2.imread(chemin)
@@ -160,7 +167,7 @@ def api_analyser_image():
             'confiance': float(round(confiance, 1))
         })
 
-    nom_base = os.path.splitext(photo.filename)[0]
+    nom_base = os.path.splitext(nom_fichier)[0]
     nom_resultat = f"result_{nom_base}.jpg"
     chemin_resultat = os.path.join(app.config['RESULTS'], nom_resultat)
     cv2.imwrite(chemin_resultat, image_cv)
@@ -181,9 +188,10 @@ def api_video_upload():
     if not video:
         return jsonify({'erreur': 'Aucune vidéo reçue'}), 400
 
-    chemin_video = os.path.join(app.config['UPLOAD_VIDEOS'], video.filename)
+    nom_fichier = nom_unique(video.filename)
+    chemin_video = os.path.join(app.config['UPLOAD_VIDEOS'], nom_fichier)
     video.save(chemin_video)
-    return jsonify({'fichier': video.filename})
+    return jsonify({'fichier': nom_fichier})
 
 @app.route('/api/analyser/video/stream')
 def api_video_stream():
