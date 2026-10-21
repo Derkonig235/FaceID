@@ -160,7 +160,8 @@ def api_analyser_image():
             'confiance': float(round(confiance, 1))
         })
 
-    nom_resultat = f"result_{photo.filename}"
+    nom_base = os.path.splitext(photo.filename)[0]
+    nom_resultat = f"result_{nom_base}.jpg"
     chemin_resultat = os.path.join(app.config['RESULTS'], nom_resultat)
     cv2.imwrite(chemin_resultat, image_cv)
 
